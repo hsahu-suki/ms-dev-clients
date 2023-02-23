@@ -14,6 +14,9 @@ import (
 	"time"
 
 	"cloud.google.com/go/storage"
+	v1 "github.com/LearningMotors/go-genproto/suki/pb/ssp/v1"
+	"github.com/LearningMotors/ms-dev-clients/src/main/asrClient"
+	"github.com/google/uuid"
 )
 
 const (
@@ -46,13 +49,17 @@ func init() {
 
 }
 
-func readFromGCP(w http.ResponseWriter, r *http.Request) {
+func readFromGCPOuter(w http.ResponseWriter, r *http.Request) {
+	readFromGCP()
+}
+
+func readFromGCP() (string, error) {
 	// Read the object1 from bucket.
 	client, err := storage.NewClient(context.Background())
 	if err != nil {
 		log.Println("Error: ", err)
 	}
-	rc, err := client.Bucket(bucketName).Object("test-files/image-20230215-092549.png").NewReader(context.Background())
+	rc, err := client.Bucket(bucketName).Object("test-files/audio-sample-1.mp3").NewReader(context.Background())
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -61,7 +68,9 @@ func readFromGCP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	f, err := os.Create("data.png")
+
+	id := uuid.New()
+	f, err := os.Create(id.String() + ".wav")
 
 	if err != nil {
 		log.Fatal(err)
@@ -76,15 +85,29 @@ func readFromGCP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fmt.Println("done")
+	return id.String() + ".wav", nil
 }
-
 func main() {
 	http.HandleFunc("/uploadlocal", uploadlocal)
 	http.HandleFunc("/uploadgcp", uploadgcp)
-	http.HandleFunc("/read", readFromGCP)
+	http.HandleFunc("/read", readFromGCPOuter)
+	http.HandleFunc("/transcribe", transcribe)
 	err := http.ListenAndServe(":9090", nil) // setting listening port
 	if err != nil {
 		log.Fatal("ListenAndServe: ", err)
+	}
+}
+
+func transcribe(w http.ResponseWriter, r *http.Request) {
+	asrs := []v1.ASR{v1.ASR_GOOGLE}     //, v1.ASR_SUKI}
+	audioFilename, err := readFromGCP() // "/home/hsahu/suki/ms-dev-clients/testsSukiAudio.wav"
+	if err != nil {
+		log.Println("Error: ", err)
+		return
+	}
+	res := asrClient.ProcessWithASRManager(asrs, audioFilename)
+	for k, v := range res {
+		fmt.Println(k, " : "+v.FinalText+" "+v.NonFinalText)
 	}
 }
 
@@ -97,7 +120,7 @@ func uploadlocal(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(h, strconv.FormatInt(crutime, 10))
 		token := fmt.Sprintf("%x", h.Sum(nil))
 
-		t, err := template.ParseFiles("main/upload.gtpl")
+		t, err := template.ParseFiles("src/main/upload.gtpl")
 
 		if err != nil {
 			log.Println("Error:", err)
@@ -134,7 +157,7 @@ func uploadgcp(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(h, strconv.FormatInt(crutime, 10))
 		token := fmt.Sprintf("%x", h.Sum(nil))
 
-		t, err := template.ParseFiles("main/upload.gtpl")
+		t, err := template.ParseFiles("src/main/upload.gtpl")
 
 		if err != nil {
 			log.Println("Error:", err)
@@ -158,36 +181,6 @@ func uploadgcp(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 }
-
-// func (c *gin.Context) {
-// 	f, err := c.FormFile("file_input")
-// 	if err != nil {
-// 		c.JSON(http.StatusInternalServerError, gin.H{
-// 			"error": err.Error(),
-// 		})
-// 		return
-// 	}
-
-// 	blobFile, err := f.Open()
-// 	if err != nil {
-// 		c.JSON(http.StatusInternalServerError, gin.H{
-// 			"error": err.Error(),
-// 		})
-// 		return
-// 	}
-
-// 	err = uploader.UploadFile(blobFile, f.Filename)
-// 	if err != nil {
-// 		c.JSON(http.StatusInternalServerError, gin.H{
-// 			"error": err.Error(),
-// 		})
-// 		return
-// 	}
-
-// 	c.JSON(200, gin.H{
-// 		"message": "success",
-// 	})
-// }
 
 // UploadFile uploads an object
 func (c *ClientUploader) UploadFile(file multipart.File, object string) error {
